@@ -57,7 +57,7 @@
       throw "ERROR: HTMLYouTubeVideoElement requires window.postMessage";
     }
 
-    var self = this,
+    var self = new Popcorn._MediaElementProto(),
       parent = typeof id === "string" ? document.querySelector( id ) : id,
       elem = document.createElement( "div" ),
       impl = {
@@ -114,6 +114,7 @@
     }
 
     function onPlayerReady( event ) {
+
       var onMuted = function() {
         if ( player.isMuted() ) {
           // force an initial play on the video, to remove autostart on initial seekTo.
@@ -255,6 +256,11 @@
 
     function onBuffering() {
       impl.networkState = self.NETWORK_LOADING;
+      var newDuration = player.getDuration();
+      if (impl.duration !== newDuration) {
+        impl.duration = newDuration;
+        self.dispatchEvent( "durationchange" );
+      }
       self.dispatchEvent( "waiting" );
     }
 
@@ -380,6 +386,9 @@
       // Don't show annotations by default
       playerVars.iv_load_policy = playerVars.iv_load_policy || 3;
 
+      // Disable keyboard controls by default
+      playerVars.disablekb = playerVars.disablekb || 1;
+
       // Don't show video info before playing
       playerVars.showinfo = playerVars.showinfo || 0;
 
@@ -395,40 +404,29 @@
       // Set wmode to transparent to show video overlays
       playerVars.wmode = playerVars.wmode || "opaque";
 
+      if ( playerVars.html5 !== 0 ) {
+        playerVars.html5 = 1;
+      }
+
       // Get video ID out of youtube url
       aSrc = regexYouTube.exec( aSrc )[ 1 ];
 
-      var xhrURL = "https://gdata.youtube.com/feeds/api/videos/" + aSrc + "?v=2&alt=jsonc&callback=?";
-      // Get duration value.
-      Popcorn.getJSONP( xhrURL, function( resp ) {
-        var warning = "failed to retreive duration data, reason: ";
-        if ( resp.error ) {
-          console.warn( warning + resp.error.message );
-          return ;
-        } else if ( !resp.data ) {
-          console.warn( warning + "no response data" );
-          return;
+      player = new YT.Player( elem, {
+        width: "100%",
+        height: "100%",
+        wmode: playerVars.wmode,
+        videoId: aSrc,
+        playerVars: playerVars,
+        events: {
+          'onReady': onPlayerReady,
+          'onError': onPlayerError,
+          'onStateChange': onPlayerStateChange
         }
-        impl.duration = resp.data.duration;
-        self.dispatchEvent( "durationchange" );
-
-        player = new YT.Player( elem, {
-          width: "100%",
-          height: "100%",
-          wmode: playerVars.wmode,
-          videoId: aSrc,
-          playerVars: playerVars,
-          events: {
-            'onReady': onPlayerReady,
-            'onError': onPlayerError,
-            'onStateChange': onPlayerStateChange
-          }
-        });
-
-        impl.networkState = self.NETWORK_LOADING;
-        self.dispatchEvent( "loadstart" );
-        self.dispatchEvent( "progress" );
       });
+
+      impl.networkState = self.NETWORK_LOADING;
+      self.dispatchEvent( "loadstart" );
+      self.dispatchEvent( "progress" );
     }
 
     function monitorCurrentTime() {
@@ -453,11 +451,10 @@
       }
     }
 
-    function getCurrentTime() {
-      return impl.currentTime;
-    }
-
     function changeCurrentTime( aTime ) {
+      if ( aTime === impl.currentTime ) {
+        return;
+      }
       impl.currentTime = aTime;
       if( !mediaReady ) {
         addMediaReadyCallback( function() {
@@ -630,7 +627,7 @@
 
       currentTime: {
         get: function() {
-          return getCurrentTime();
+          return impl.currentTime;
         },
         set: function( aValue ) {
           changeCurrentTime( aValue );
@@ -730,41 +727,36 @@
 
               //throw fake DOMException/INDEX_SIZE_ERR
               throw "INDEX_SIZE_ERR: DOM Exception 1";
-            }
+            },
+            length: 1
           };
 
-          Object.defineProperties( timeRanges, {
-            length: {
-              get: function() {
-                return 1;
-              }
-            }
-          });
-
           return timeRanges;
-        }
+        },
+        configurable: true
       }
     });
+
+    self._canPlaySrc = Popcorn.HTMLYouTubeVideoElement._canPlaySrc;
+    self.canPlayType = Popcorn.HTMLYouTubeVideoElement.canPlayType;
+
+    return self;
   }
 
-  HTMLYouTubeVideoElement.prototype = new Popcorn._MediaElementProto();
-  HTMLYouTubeVideoElement.prototype.constructor = HTMLYouTubeVideoElement;
+  Popcorn.HTMLYouTubeVideoElement = function( id ) {
+    return new HTMLYouTubeVideoElement( id );
+  };
 
   // Helper for identifying URLs we know how to play.
-  HTMLYouTubeVideoElement.prototype._canPlaySrc = function( url ) {
+  Popcorn.HTMLYouTubeVideoElement._canPlaySrc = function( url ) {
     return (/(?:http:\/\/www\.|http:\/\/|www\.|\.|^)(youtu).*(?:\/|v=)(.{11})/).test( url ) ?
       "probably" :
       EMPTY_STRING;
   };
 
   // We'll attempt to support a mime type of video/x-youtube
-  HTMLYouTubeVideoElement.prototype.canPlayType = function( type ) {
+  Popcorn.HTMLYouTubeVideoElement.canPlayType = function( type ) {
     return type === "video/x-youtube" ? "probably" : EMPTY_STRING;
   };
-
-  Popcorn.HTMLYouTubeVideoElement = function( id ) {
-    return new HTMLYouTubeVideoElement( id );
-  };
-  Popcorn.HTMLYouTubeVideoElement._canPlaySrc = HTMLYouTubeVideoElement.prototype._canPlaySrc;
 
 }( Popcorn, window, document ));
